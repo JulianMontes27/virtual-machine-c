@@ -25,8 +25,6 @@ typedef unsigned short uint16_t;     // 16-bit unsigned integer
 typedef unsigned int uint32_t;       // 32-bit unsigned integer
 typedef unsigned long long uint64_t; // 64-bit unsigned integer
 
-typedef uint8_t Memory[65536]; // Memory: can hold 2^16 bytes (64KB)
-
 /**
  * MEMORY_MAX becomes 65536, which is the total number of memory locations the LC-3 (addressable range)
  * can address (from 0x0000 to 0xFFFF).
@@ -52,15 +50,9 @@ enum
 
 uint16_t reg[R_COUNT]; /* Array that stores the current values of all CPU registers */
 
-/* Condition Flag Definitions */
-enum
-{
-    FL_POS = 1 << 0, /* P, POSITIVE: Result of last operation was positive (bit 0 set to 1) */
-    FL_ZRO = 1 << 1, /* Z, ZERO: Result of last operation was zero (bit 1 set to 1) */
-    FL_NEG = 1 << 2, /* N, NEGATIVE: Result of last operation was negative (bit 2 set to 1) */
-};
-
 /* CPU Architecture (LC-3) Opcodes */
+/* Instructions are 16 bits long, with the left 4 bits storing the opcode... the rest of the 12 bits are used to store params */
+/* They are ordered so that they are assigned the proper enum value */
 enum
 {
     OP_BR = 0, /* branch: conditionally branch to a location if condition flags match */
@@ -79,6 +71,15 @@ enum
     OP_RES,    /* reserved: unused opcode */
     OP_LEA,    /* load effective address: load the address of a memory location into a register */
     OP_TRAP    /* execute trap: system call for I/O operations and program control */
+};
+
+/* Condition Flag Definitions */
+/* Each CPU has a variety of condition flags to signal various situations. The LC-3 uses only 3 condition flags which indicate the sign of the previous calculation. */
+enum
+{
+    FL_POS = 1 << 0, /* P, POSITIVE: Result of last operation was positive (bit 0 set to 1) */
+    FL_ZRO = 1 << 1, /* Z, ZERO: Result of last operation was zero (bit 1 set to 1) */
+    FL_NEG = 1 << 2, /* N, NEGATIVE: Result of last operation was negative (bit 2 set to 1) */
 };
 
 /**

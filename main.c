@@ -71,11 +71,96 @@ uint16_t check_key()
     return WaitForSingleObject(hStdin, 1000) == WAIT_OBJECT_0 && _kbhit();
 }
 
-void handle_interrupt(int signal)
+/**
+ * handle_interrupt - Clean up and exit when CTRL+C is pressed
+ *
+ * This function serves as a signal handler for interrupt signals (CTRL+C).
+ * It restores the original console input settings and exits the program.
+ */
+void handle_interrupt()
 {
     restore_input_buffering();
     printf("\n");
     exit(-2);
+}
+
+/**
+ * sign_extend - Extend a value to 16 bits with sign preservation
+ *
+ * This function takes a value with a specific bit count and extends it
+ * to a 16-bit value, preserving the sign bit (most significant bit).
+ *
+ * Parameters:
+ *   x: The value to extend
+ *   bit_count: The number of bits in the original value
+ *
+ * Returns:
+ *   uint16_t: The sign-extended 16-bit value
+ */
+uint16_t sign_extend(uint16_t x, int bit_count)
+{
+    if ((x >> (bit_count - 1)) & 1)
+    {
+        x |= (0xFFFF << bit_count);
+    }
+    return x;
+}
+
+/**
+ * read_image - Load a program image into memory
+ *
+ * This function loads a program binary file into the VM's memory space.
+ * The file format has a header specifying the origin address, followed
+ * by the program data.
+ *
+ * Parameters:
+ *   image_path: Path to the image file
+ *
+ * Returns:
+ *   int: 1 on success, 0 on failure
+ */
+int read_image(const char *image_path)
+{
+    FILE *file = fopen(image_path, "rb");
+    if (!file)
+    {
+        printf("Error: Could not open file %s\n", image_path);
+        return 0;
+    }
+
+    /* Read the origin (where in memory the program should be loaded) */
+    uint16_t origin;
+    if (fread(&origin, sizeof(origin), 1, file) != 1)
+    {
+        printf("Error: Could not read origin from file %s\n", image_path);
+        fclose(file);
+        return 0;
+    }
+
+    /* The origin tells us where in memory to put the program.
+     * We need to convert it from big-endian to little-endian if needed.
+     */
+    /* Swap bytes on little endian architectures */
+    origin = (origin << 8) | (origin >> 8);
+
+    /* Load the program into memory starting at the origin address */
+    printf("Loading image %s at origin 0x%04X\n", image_path, origin);
+
+    uint16_t max_read = MEMORY_MAX - origin;
+    uint16_t *p = memory + origin;
+    size_t read = fread(p, sizeof(uint16_t), max_read, file);
+
+    /* Convert each word from big-endian to little-endian if necessary */
+    for (size_t i = 0; i < read; i++)
+    {
+        p[i] = (p[i] << 8) | (p[i] >> 8);
+    }
+
+    /* Output statistics about the loaded image */
+    printf("Loaded %zu words into memory\n", read);
+
+    fclose(file);
+    return 1;
 }
 
 /**
@@ -93,20 +178,14 @@ void handle_interrupt(int signal)
  */
 int main(int argc, const char *argv[])
 {
-
-    /* Suppress compiler warnings about unused parameters by explicitly casting them to void
-     * This is useful when the parameters might be used in future versions but aren't used yet
-     */
-    (void)argc;
-    (void)argv;
-
     /* Load arguments */
+    /* To handle command line input to make our program usable. We expect one or more paths to VM images and present a usage string if none are given. */
     if (argc < 2)
     {
         printf("lc3 [image-file1] ...\n");
         exit(2);
     }
-
+    // Load all image files provided as arguments
     for (int j = 1; j < argc; ++j)
     {
         if (!read_image(argv[j]))
@@ -120,11 +199,12 @@ int main(int argc, const char *argv[])
     signal(SIGINT, handle_interrupt);
     disable_input_buffering();
 
+    /* MAIN VM EXECUTION PROCEDURE */
     /* Since exactly one condition flag should be set at any given time, set the Z flag */
     reg[R_COND] = FL_ZRO;
 
     /* set the PC to starting position */
-    /* 0x3000 is the default */
+    /* 0x3000 is the default address */
     enum
     {
         PC_START = 0x3000
@@ -132,50 +212,28 @@ int main(int argc, const char *argv[])
     reg[R_PC] = PC_START;
 
     int running = 1;
+    printf("VM initialized and ready. Hit Ctrl+C to exit.\n");
+
+    /* CPU EXECUTION CYCLE */
     while (running)
     {
         /* FETCH */
-        uint16_t instr = mem_read(reg[R_PC]++);
-        uint16_t op = instr >> 12;
+        /* Fetch: Get the next instruction from memory at the address in PC, and advance PC */
+        uint16_t instr = memory[reg[R_PC]++]; // Access the memory array at the address stored in the PC register, and after that access, PC is incremented by 1 to point to the next instruction
+        uint16_t op = instr >> 12;            // This right-shifts the instruction value by 12 bits. In the LC-3 architecture, the leftmost 4 bits (bits 12-15) contain the opcode that identifies which instruction to execute (ADD, AND, LD, etc.).
 
-        switch (op)
-        {
-        case OP_ADD:
-            
-            break;
-        case OP_AND:
-            @{ AND } break;
-        case OP_NOT:
-            @{ NOT } break;
-        case OP_BR:
-            @{ BR } break;
-        case OP_JMP:
-            @{ JMP } break;
-        case OP_JSR:
-            @{ JSR } break;
-        case OP_LD:
-            @{ LD } break;
-        case OP_LDI:
-            @{ LDI } break;
-        case OP_LDR:
-            @{ LDR } break;
-        case OP_LEA:
-            @{ LEA } break;
-        case OP_ST:
-            @{ ST } break;
-        case OP_STI:
-            @{ STI } break;
-        case OP_STR:
-            @{ STR } break;
-        case OP_TRAP:
-            @{ TRAP } break;
-        case OP_RES:
-        case OP_RTI:
-        default:
-            @{ BAD OPCODE } break;
-        }
+        /* For now, just print the instruction for debugging */
+        printf("Executing instruction at 0x%04X: 0x%04X (opcode: 0x%X)\n",
+               reg[R_PC] - 1, instr, op);
+
+        /* Add a small delay to not overwhelm the console */
+        Sleep(500);
+
+        /* Basic implementation - add proper instruction execution here */
+        /* This is just a placeholder to demonstrate program flow */
     }
 
+    /* When the program is interrupted, we want to restore the terminal settings back to normal. */
     restore_input_buffering();
 
     /* Return successful exit status */

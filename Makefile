@@ -72,9 +72,17 @@ endif
 rebuild: clean all
 
 # Run the program
+# Modified to accept image file path as an optional argument
 run: $(TARGET)
 	@echo "Running $(TARGET)..."
-	./$(TARGET)
+ifeq ($(IMAGE),)
+	@echo "No image file specified. Use 'make run IMAGE=path/to/image.obj' to provide an image file."
+	@echo "For now, creating a dummy test image file..."
+	@echo "0000" > test_image.obj
+	./$(TARGET) test_image.obj
+else
+	./$(TARGET) $(IMAGE)
+endif
 
 # Check for memory leaks (platform-specific)
 memcheck: $(TARGET)
@@ -94,7 +102,7 @@ help:
 	@echo "  all       - Build the executable (default)"
 	@echo "  clean     - Remove object files and executable"
 	@echo "  rebuild   - Clean and rebuild everything"
-	@echo "  run       - Build and run the program"
+	@echo "  run       - Build and run the program (use 'make run IMAGE=path/to/image.obj' to specify an image)"
 	@echo "  memcheck  - Run with memory checker (Valgrind on Unix, Dr. Memory on Windows)"
 	@echo "  help      - Show this help message"
 
