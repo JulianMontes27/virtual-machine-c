@@ -1,108 +1,89 @@
 /**
  * main.h - Header file for a simple 16-bit virtual machine implementation
- * 
+ *
  * This file defines the data structures and types for a basic virtual machine
- * that emulates a 16-bit CPU architecture with a 64KB memory space.
- * The VM supports a small instruction set and register file similar to 
+ * that emulates a 16-bit CPU architecture with a 128KB memory space.
+ * The VM supports a small instruction set and register file similar to
  * early x86 architectures.
  */
+#ifndef MAIN_H
+#define MAIN_H
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdint.h>
+#include <signal.h>
+/* windows only */
+#include <Windows.h>
+#include <conio.h> // _kbhit
 
- #ifndef MAIN_H
- #define MAIN_H
- 
- #define _GNU_SOURCE
- #include <stdio.h>
- #include <unistd.h>
- #include <stdlib.h>
- #include <string.h>
- #include <stdbool.h>
- #include <assert.h>
- #include <errno.h>
+/**
+ * Type definitions for clarity and portability
+ * These ensure consistent sizes across different platforms
+ */
+typedef unsigned char uint8_t;       // 8-bit unsigned integer
+typedef unsigned short uint16_t;     // 16-bit unsigned integer
+typedef unsigned int uint32_t;       // 32-bit unsigned integer
+typedef unsigned long long uint64_t; // 64-bit unsigned integer
 
- #define NoArgs {0x00, 0x00} // 16 bit 0
- 
- /**
-  * Type definitions for clarity and portability
-  * These ensure consistent sizes across different platforms
-  */
- typedef unsigned char      uint8_t;  // 8-bit unsigned integer
- typedef unsigned short     uint16_t; // 16-bit unsigned integer
- typedef unsigned int       uint32_t; // 32-bit unsigned integer
- typedef unsigned long long uint64_t; // 64-bit unsigned integer
- 
- typedef uint16_t Reg;              // 16-bit registers
- typedef uint8_t Stack[65536];      // Memory: can hold 2^16 bytes (64KB)
- typedef uint8_t Args;              // Arguments for instructions
- 
- /**
-  * Enum defining operation codes (opcodes) for the VM
-  * Each opcode represents a different instruction the VM can execute
-  */
- typedef enum {
-     MOV = 0x01,  // Move data between registers or load immediate values
-     NOP = 0x02   // No operation (do nothing)
- } Opcode;
- 
- /**
-  * Structure mapping opcodes to their instruction sizes in bytes
-  */
- typedef struct {
-     Opcode opcode;  // The operation code
-     uint8_t size;   // Size of the complete instruction in bytes
- } InstructionMap;
- 
- /**
-  * Structure representing a machine instruction
-  * Contains an opcode and variable-length arguments
-  */
- typedef struct {
-     Opcode opcode;
-     Args args[];    // Flexible array member for arguments (0-2 bytes)
- } Instruction;
- 
- typedef Instruction Program;  // A program is a sequence of instructions
- 
- /**
-  * Structure containing all CPU registers
-  */
- typedef struct {
-     Reg ax;        // Accumulator register
-     Reg bx;        // Base register
-     Reg cx;        // Counter register
-     Reg sp;        // Stack pointer
-     Reg ip;        // Instruction pointer
- } Registers;
- 
- /**
-  * Structure representing the CPU
-  */
- typedef struct {
-     Registers regs;  // CPU registers
- } CPU;
- 
- /**
-  * Structure representing the complete virtual machine
-  */
- typedef struct {
-     CPU cpu;           // 16-bit CPU (with registers)
-     Stack *stack;      // 64KB virtual memory (65,536 bytes)
-     Program *program;  // Currently loaded program
- } VM;
- 
- /**
-  * Global instruction map table
-  * Maps each opcode to its instruction size
-  */
- static const InstructionMap instruction_map[] = {
-     { MOV, 0x03 },  // MOV instruction takes 3 bytes
-     { NOP, 0x01 }   // NOP instruction takes 1 byte
- };
- 
- /**
-  * Function declarations
-  */
- VM *vm_create(void);
- int main(int argc, char *argv[]);
-  
- #endif /* MAIN_H */
- 
+typedef uint8_t Memory[65536]; // Memory: can hold 2^16 bytes (64KB)
+
+/**
+ * MEMORY_MAX becomes 65536, which is the total number of memory locations the LC-3 (addressable range)
+ * can address (from 0x0000 to 0xFFFF).
+ */
+#define MEMORY_MAX (1 << 16) // "shift the number 1 to the left by 16 bits." or 1 * 2^16 = 65536
+uint16_t memory[MEMORY_MAX]; /* 65536 locations each 16 bits wide */
+
+/* CPU Registers */
+enum
+{
+    R_R0 = 0, /* General purpose register 0 */
+    R_R1,     /* General purpose register 1 */
+    R_R2,     /* General purpose register 2 */
+    R_R3,     /* General purpose register 3 */
+    R_R4,     /* General purpose register 4 */
+    R_R5,     /* General purpose register 5 */
+    R_R6,     /* General purpose register 6 */
+    R_R7,     /* General purpose register 7 */
+    R_PC,     /* Program counter: holds the address of the next instruction to execute */
+    R_COND,   /* Condition register: stores flags about the last operation */
+    R_COUNT   /* Total number of registers (not an actual register) */
+};
+
+uint16_t reg[R_COUNT]; /* Array that stores the current values of all CPU registers */
+
+/* Condition Flag Definitions */
+enum
+{
+    FL_POS = 1 << 0, /* P, POSITIVE: Result of last operation was positive (bit 0 set to 1) */
+    FL_ZRO = 1 << 1, /* Z, ZERO: Result of last operation was zero (bit 1 set to 1) */
+    FL_NEG = 1 << 2, /* N, NEGATIVE: Result of last operation was negative (bit 2 set to 1) */
+};
+
+/* CPU Architecture (LC-3) Opcodes */
+enum
+{
+    OP_BR = 0, /* branch: conditionally branch to a location if condition flags match */
+    OP_ADD,    /* add: add two values and store the result */
+    OP_LD,     /* load: load a value from memory into a register */
+    OP_ST,     /* store: store a register value into memory */
+    OP_JSR,    /* jump register: jump to subroutine, saving return address */
+    OP_AND,    /* bitwise and: perform logical AND operation between two values */
+    OP_LDR,    /* load register: load a value from memory with base register + offset */
+    OP_STR,    /* store register: store a register value into memory with base register + offset */
+    OP_RTI,    /* return from interrupt: unused in basic implementation */
+    OP_NOT,    /* bitwise not: perform logical NOT operation on a value */
+    OP_LDI,    /* load indirect: load a value from a memory location pointed to by another memory location */
+    OP_STI,    /* store indirect: store a value to a memory location pointed to by another memory location */
+    OP_JMP,    /* jump: unconditional jump to a location */
+    OP_RES,    /* reserved: unused opcode */
+    OP_LEA,    /* load effective address: load the address of a memory location into a register */
+    OP_TRAP    /* execute trap: system call for I/O operations and program control */
+};
+
+/**
+ * Function declarations
+ */
+int main(int argc, const char *argv[]); /* Main function that serves as the entry point for the VM */
+
+#endif /* MAIN_H */
