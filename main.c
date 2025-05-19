@@ -220,17 +220,86 @@ int main(int argc, const char *argv[])
         /* FETCH */
         /* Fetch: Get the next instruction from memory at the address in PC, and advance PC */
         uint16_t instr = memory[reg[R_PC]++]; // Access the memory array at the address stored in the PC register, and after that access, PC is incremented by 1 to point to the next instruction
-        uint16_t op = instr >> 12;            // This right-shifts the instruction value by 12 bits. In the LC-3 architecture, the leftmost 4 bits (bits 12-15) contain the opcode that identifies which instruction to execute (ADD, AND, LD, etc.).
+
+        /* DECODE */
+        uint16_t op = instr >> 12; // This right-shifts the instruction value by 12 bits. In the LC-3 architecture, the leftmost 4 bits (bits 12-15) contain the opcode that identifies which instruction to execute (ADD, AND, LD, etc.).
 
         /* For now, just print the instruction for debugging */
-        printf("Executing instruction at 0x%04X: 0x%04X (opcode: 0x%X)\n",
-               reg[R_PC] - 1, instr, op);
+        printf("Executing instruction at 0x%04X: 0x%04X (opcode: 0x%X)\n", reg[R_PC] - 1, instr, op);
 
-        /* Add a small delay to not overwhelm the console */
-        Sleep(500);
+        /* EXECUTE */
+        switch (op)
+        {
+        case OP_BR: /* Branch */
+        {
+            /*
+                --- Instruction format ---
+                15-12   11-9   8-0
+                |OP_BR| nzp |PCoffset9|
+                Where:
+                * Bits 15–12: opcode (0000 for BR)
+                * Bits 11–9: condition codes (N, Z, P) — e.g., 010 means "branch if result was zero"
+                * Bits 8–0: a signed 9-bit offset to jump relative to current PC
 
-        /* Basic implementation - add proper instruction execution here */
-        /* This is just a placeholder to demonstrate program flow */
+                * The BR instruction will branch (jump) if ANY of the condition flags that are set in the instruction match the current condition flag in R_COND.
+            */
+            /*
+            The BR instruction is very powerful because it allows for different kinds of conditional branches:
+                1. BRn: Branch if negative (condition = 100)
+                2. BRz: Branch if zero (condition = 010)
+                3. BRp: Branch if positive (condition = 001)
+                4. BRnz: Branch if negative or zero (condition = 110)
+                5. BRnp: Branch if negative or positive (condition = 101)
+                6. BRzp: Branch if zero or positive (condition = 011)
+                7. BRnzp: Always branch (condition = 111)
+            */
+            uint16_t pc_offset = sign_extend(instr & 0x1FF, 9); // get 9-bit signed offset
+            uint16_t cond_flag = (instr >> 9) & 0x7;            // get NZP bits (bits 11–9)
+            if (cond_flag & reg[R_COND])                        // if current condition matches
+            {
+                reg[R_PC] += pc_offset; // jump relative to current PC
+            }
+            break;
+        }
+        case OP_ADD: /* Add */
+        {
+            /**
+             * The ADD instruction takes two numbers, adds them together, and stores the result in a register. Each ADD instruction looks like the following:
+             * Instruction format:argc
+             *  15-12       11-9   8-6    5   4-3   2-0
+                |OP_BR|     DR    |SR1|   0  |00|   SR2
+            OR
+
+                15-12       11-9   8-6     5      4-0
+                |OP_BR|     DR    |SR1|    1     |imm5|
+
+            If bit [5] is 0, the second source operand is obtained from SR2. If bit [5] is 1, the second source operand is obtained by sign-extending the imm5 field to 16 bits. In both cases, the second source operand is added to the contents of SR1 and the result stored in DR.
+            */
+            /* Destination register (DR) */
+            uint16_t dr = (instr >> 9) & 0x7;
+            /* First operand */
+            uint16_t r1 = (instr >> 6) & 0x7;
+            /* whether we are in immediate mode */
+            uint16_t imm_flag = (instr >> 5) & 0x1;
+
+            if (imm_flag == 1)
+            {
+                /* Immediate mode */
+                uint16_t imm5 = sign_extend(instr & 0x1F, 5); // Convert 5-bit value to 16-bit signed 
+                reg[dr] = reg[r1] + imm5;
+            }
+            else
+            {
+                /* Register mode */
+                uint16_t r2 = instr & 0x7;
+                reg[dr] = reg[r1] + reg[r2];
+            }
+
+            /* Update condition flags */
+            update_flags(dr);
+            break;
+        }
+        }
     }
 
     /* When the program is interrupted, we want to restore the terminal settings back to normal. */
