@@ -16,6 +16,7 @@ void restore_input_buffering();
 uint16_t check_key();
 void handle_interrupt();
 uint16_t sign_extend(uint16_t x, int bit_count);
+uint16_t swap16(uint16_t x);
 int read_image(const char *image_path);
 void update_flags(uint16_t r);
 
@@ -141,21 +142,21 @@ void update_flags(uint16_t r)
 }
 
 /**
- * read_image - Load a program image into memory
+ * read_image - Load a program (binary file) image into memory for the VM's CPU to execute it.
  *
  * This function loads a program binary file into the VM's memory space.
  * The file format has a header specifying the origin address, followed
  * by the program data.
  *
  * Parameters:
- *   image_path: Path to the image file
+ *   image_path: Path to the image file (i.e., "prog.obj")
  *
  * Returns:
  *   int: 1 on success, 0 on failure
  */
 int read_image(const char *image_path)
 {
-    FILE *file = fopen(image_path, "rb");
+    FILE *file = fopen(image_path, "rb"); //  Open in binary read mode (important for non-text files)
     if (!file)
     {
         printf("Error: Could not open file %s\n", image_path);
@@ -163,6 +164,7 @@ int read_image(const char *image_path)
     }
 
     /* Read the origin (where in memory the program should be loaded) */
+    // The first 2 bytes of the LC-3 object file specify the origin, i.e., where in memory the program should be loaded (like 0x3000).fread tries to read 1 value of sizeof(uint16_t)(2 bytes).
     uint16_t origin;
     if (fread(&origin, sizeof(origin), 1, file) != 1)
     {
@@ -173,7 +175,12 @@ int read_image(const char *image_path)
 
     /* The origin tells us where in memory to put the program.
      * We need to convert it from big-endian to little-endian if needed.
+     LC-3 object files store numbers in big-endian (MSB first).
+     x86 computers are little-endian (LSB first).
+     So we swap the bytes: 
+     0x1234 (big-endian) becomes 0x3412 (little-endian)
      */
+    
     /* Swap bytes on little endian architectures */
     origin = (origin << 8) | (origin >> 8);
 
@@ -534,12 +541,14 @@ int main(int argc, const char *argv[])
                 update_flags(R_R0);
                 break;
             }
+
             case TRAP_OUT: /* OUT: Output a character */
             {
                 putc((char)reg[R_R0], stdout);
                 fflush(stdout);
                 break;
             }
+
             case TRAP_PUTS: /* PUTS: output a null-terminated string to the screen (similar to 'printf' in C) */
             {
                 /**
@@ -568,6 +577,7 @@ int main(int argc, const char *argv[])
                 fflush(stdout); // Make sure it prints immediately
                 break;
             }
+
             case TRAP_IN: /* IN: Input a character with echo */
             {
                 printf("Enter a character: ");
@@ -578,9 +588,10 @@ int main(int argc, const char *argv[])
                 update_flags(reg[R_R0]);
                 break;
             }
+
             case TRAP_PUTSP: /* PUTSP: Output a byte string contained in a memory location (which is 16 bits or 2 bytes)*/
             {
-                /**
+                /*
                  * sys call
                  * Same as PUTS except that it outputs null terminated strings with two ASCII chars packed into a single memory location, with low 8 bits outputted frist then the high 8 bits
                  * The “SP” means "String Packed”.
@@ -609,6 +620,7 @@ int main(int argc, const char *argv[])
                     ++str_ptr; // Move to the next 16-bit word
                 }
             }
+
             case TRAP_HALT: /* HALT: Halt program execution */
             {
                 puts("HALT");
@@ -617,12 +629,12 @@ int main(int argc, const char *argv[])
                 break;
             }
             }
+        }
 
         default:
         {
             abort(); // Terminate or exit the program by raising the 'SIGABRT' signal. The 'SIGABRT' signal is one of the signals used in operating systems to indicate an abnormal termination of a program.
             break;
-        }
         }
         }
 
@@ -632,3 +644,4 @@ int main(int argc, const char *argv[])
         /* Return successful exit status */
         return EXIT_SUCCESS;
     }
+}
