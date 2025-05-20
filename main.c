@@ -359,6 +359,7 @@ int main(int argc, const char *argv[])
                 uint16_t r1 = (instr >> 6) & 0x7;
                 reg[R_PC] = reg[r1]; /* JSRR */
             }
+            break;
         }
 
         case OP_AND: /* Bitwise AND */
@@ -369,15 +370,39 @@ int main(int argc, const char *argv[])
 
             if (imm_flag)
             {
+                /* Immediate mode */
                 uint16_t imm5 = sign_extend(instr & 0x1f, 5);
-                reg[r0] = reg[r1] & imm5;
+                reg[r0] = reg[r1] & imm5; // Bitwise AND
             }
             else
             {
+                /* Register mode */
                 uint16_t r2 = instr & 0x7;
-                reg[r0] = reg[r1] & reg[r2];
+                reg[r0] = reg[r1] & reg[r2]; // Bitwise AND
             }
             update_flags(0);
+            break;
+        }
+
+        case OP_LDR: /* Load Register */
+        {
+            uint16_t r0 = (instr >> 9) & 0x7;
+            uint16_t r1 = (instr >> 6) & 0x7;
+            uint16_t offset = sign_extend(instr & 0x3F, 6);
+
+            reg[r0] = memory[reg[r1] + offset];
+            update_flags(r0);
+            break;
+        }
+
+        case OP_STR: /* Store Register */
+        {
+            uint16_t r0 = (instr >> 9) & 0x7;
+            uint16_t r1 = (instr >> 6) & 0x7;
+            uint16_t offset = sign_extend(instr & 0x3F, 6);
+
+            memory[reg[r1] + offset] = reg[r0];
+            break;
         }
         }
     }
