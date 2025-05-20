@@ -29,7 +29,7 @@ typedef unsigned long long uint64_t; // 64-bit unsigned integer
  * MEMORY_MAX becomes 65536, which is the total number of memory locations the LC-3 (addressable range)
  * can address (from 0x0000 to 0xFFFF).
  */
-#define MEMORY_MAX (1 << 16) // "shift the number 1 to the left by 16 bits." or 1 * 2^16 = 65536
+#define MEMORY_MAX (1 << 16) // "shift the number 1 to the left by 16 bits." = 10000000000000000 (17 bits) or 1 * 2^16 = 65536
 uint16_t memory[MEMORY_MAX]; /* 65536 locations each 16 bits wide */
 
 /* CPU Registers */

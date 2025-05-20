@@ -242,7 +242,7 @@ int main(int argc, const char *argv[])
     /* Programs start at address 0x3000 instead of 0x0, because the lower addresses are left empty to leave space for the trap routine code. */
     enum
     {
-        PC_START = 0x3000 // 0011000000000000 in binary (16-bit), 12288 in decimal
+        PC_START = 0x3000 // Address 0011000000000000 in binary (16-bit), 12288 in decimal. This is the index position on the memory array
     };
     reg[R_PC] = PC_START;
 
@@ -254,7 +254,7 @@ int main(int argc, const char *argv[])
     {
         /* FETCH */
         /* Fetch: Get the next instruction from memory at the address in PC, and advance PC */
-        uint16_t instr = memory[reg[R_PC]++]; // Access the memory array at the address stored in the PC register, and after that access, PC is incremented by 1 to point to the next instruction
+        uint16_t instr = memory[reg[R_PC]++]; // Access the memory array at the address stored in the PC register, get the instruction (16 bit unsigned short int) and after that access, increment program counter (PC) by 1 to point to the next instruction in memory
 
         /* DECODE */
         /* Decode: Get the instruction's opcode, which are the 4 leftmost bits in the 16 bit unsigned int (the instruction) */
@@ -473,7 +473,7 @@ int main(int argc, const char *argv[])
             /* add pc_offset to the current PC, look at that memory location to get the final address */
             uint16_t addr = memory[reg[R_PC] + pc_offset];
             reg[dr] = memory[addr];
-            update(dr);
+            update_flags(dr);
             break;
         }
 
@@ -517,10 +517,13 @@ int main(int argc, const char *argv[])
             /**
              * The LC-3 provides a few predefined routines for performing common tasks and interacting with I/O devices. For example, there are routines for getting input from the keyboard and for displaying strings to the console. These are called trap routines which you can think of as the operating system or API for the LC-3. Each trap routine is assigned a trap code which identifies it (similar to an opcode). To execute one, the TRAP instruction is called with the trap code of the desired routine.
              */
+            /*
+             * The trap will eventually return control back to where it was called from. So we store the current PC into register R7, which LC-3 uses as the return address register. This is similar to how real CPUs use a link register or stack to remember return points.
+             */
             reg[R_R7] = reg[R_PC];
 
             /* Get trap vector */
-            uint16_t trapvect = instr & 0xFF;
+            uint16_t trapvect = instr & 0xFF; // Extract lower 8 bits of the instruction
 
             switch (trapvect)
             {
@@ -537,7 +540,66 @@ int main(int argc, const char *argv[])
                 fflush(stdout);
                 break;
             }
+            case TRAP_PUTS: /* PUTS: output a null-terminated string to the screen (similar to 'printf' in C) */
+            {
+                /**
+                 *  15    12 | 11-8  |  7      0
+                    [ 1111  | xxxx  | trapvect8 ]
+
+                 * Write a string of ASCII characters to the console display. The characters are contained in consecutive memory locations, one character per memory location, starting with the address specified in R0. Writing terminates with the occurrence of x0000 in a memory location. (Pg. 543)
+                 * To display a string, we must give the trap routine a string to display. This is done by storing the address of the first character in R0 before beginning the trap.
+                 */
+                /**
+                 * Notice that unlike C strings, characters are not stored in a single byte, but in a single memory location. Memory locations in LC-3 are 16 bits, so each character in the string is 16 bits wide. To display this with a C function, we will need to convert each value to a char and output them individually.
+                 */
+
+                // Get pointer to string in memory (R0 holds starting address)
+                uint16_t *str_ptr;
+                str_ptr = &memory[reg[R_R0]]; // point to the address of the value stored in memory's reg[R_R0] index
+                char c;
+
+                // Loop through each character until null terminator (x0000)
+                while (*str_ptr != 0)
+                {
+                    c = (char)(*str_ptr); // Cast 16-bit word to char
+                    putc(c, stdout);      // Print character to console
+                    str_ptr++;            // Move to next character in string
+                }
+                fflush(stdout); // Make sure it prints immediately
+                break;
             }
+            case TRAP_IN: /* IN: Input a character with echo */
+            {
+                printf("Enter a character: ");
+                int character = getchar();
+                reg[R_R0] = (uint16_t)character;
+                putchar((char)reg[R_R0]);
+                fflush(stdout);
+                update_flags(reg[R_R0]);
+                break;
+            }
+            case TRAP_PUTSP: /* PUTSP: Output a byte string */
+            {
+                /**
+                 * Same as PUTS except that it outputs null terminated strings with two ASCII chars packed into a single memory location, with low 8 bits outputted frist then the high 8 bits
+                 */
+                /*
+                 * one char per byte (two bytes per word) here we need to swap back to big endian format
+                 */
+
+                /* Get string pointer from R0 */
+                
+
+
+
+            }
+            }
+        }
+
+        default:
+        {
+            abort(); // Terminate or exit the program by raising the 'SIGABRT' signal. The 'SIGABRT' signal is one of the signals used in operating systems to indicate an abnormal termination of a program.
+            break;
         }
         }
     }
