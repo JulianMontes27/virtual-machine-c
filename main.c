@@ -99,9 +99,13 @@ void handle_interrupt()
  */
 uint16_t sign_extend(uint16_t x, int bit_count)
 {
+    // Checks if the sign bit is 1.
+    // For bit_count = 5, it checks bit 4(counting from 0).
+    // If that bit is 1, the number is negative, and we need to extend the 1s to the left.
     if ((x >> (bit_count - 1)) & 1)
     {
-        x |= (0xFFFF << bit_count);
+        // If the sign bit was 1, this line fills the top bits with 1s.
+        x |= (0xFFFF << bit_count); // ets all upper bits above bit_count to 1
     }
     return x;
 }
@@ -207,7 +211,7 @@ int main(int argc, const char *argv[])
     /* 0x3000 is the default address */
     enum
     {
-        PC_START = 0x3000
+        PC_START = 0x3000 // 0011000000000000 in binary (16-bit), 12288 in decimal
     };
     reg[R_PC] = PC_START;
 
@@ -222,6 +226,7 @@ int main(int argc, const char *argv[])
         uint16_t instr = memory[reg[R_PC]++]; // Access the memory array at the address stored in the PC register, and after that access, PC is incremented by 1 to point to the next instruction
 
         /* DECODE */
+        /* Decode: Get the instruction's opcode, which are the 4 leftmost bits in the 16 bit unsigned int (the instruction) */
         uint16_t op = instr >> 12; // This right-shifts the instruction value by 12 bits. In the LC-3 architecture, the leftmost 4 bits (bits 12-15) contain the opcode that identifies which instruction to execute (ADD, AND, LD, etc.).
 
         /* For now, just print the instruction for debugging */
@@ -261,6 +266,7 @@ int main(int argc, const char *argv[])
             }
             break;
         }
+
         case OP_ADD: /* Add */
         {
             /**
@@ -285,7 +291,7 @@ int main(int argc, const char *argv[])
             if (imm_flag == 1)
             {
                 /* Immediate mode */
-                uint16_t imm5 = sign_extend(instr & 0x1F, 5); // Convert 5-bit value to 16-bit signed 
+                uint16_t imm5 = sign_extend(instr & 0x1F, 5); // Convert 5-bit value to 16-bit signed
                 reg[dr] = reg[r1] + imm5;
             }
             else
@@ -298,6 +304,80 @@ int main(int argc, const char *argv[])
             /* Update condition flags */
             update_flags(dr);
             break;
+        }
+
+        case OP_LD: /* Load */
+        {
+            /**
+             * Loads a value from memory into a register
+             * PC-relative addressing, meaning: The memory address is computed as PC + offset, and the content at that memory address is stored in the destination register.
+             *  15     12 | 11    9 | 8                  0
+                [  0010   |  DR     |   PCoffset9         ]
+             *
+             - Opcode (bits 15–12) = 0010 → this is LD
+             - DR (bits 11–9): Destination Register (where to load the data)
+             - PCoffset9 (bits 8–0): a 9-bit signed offset from the current PC (program counter)
+
+             */
+            uint16_t dr = (instr >> 9) & 0x7;                   // get the 11-9 bits (dr)
+            uint16_t pc_offset = sign_extend(instr & 0x1FF, 9); // converts the 9-bit value into a proper signed 16-bit int, preserving its sign
+            reg[dr] = memory[reg[R_PC] + pc_offset];
+            update_flags(dr);
+            break;
+        }
+
+        case OP_ST: /* Store */
+        {
+            /**
+             * Store a register value into memory
+             *  15     12 | 11    9 | 8                  0
+                [  0011   |  DR    |   PCoffset9         ]
+             */
+            uint16_t dr = (instr >> 9) & 0x7;
+            uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+            memory[reg[R_PC] + pc_offset] = reg[dr];
+            break;
+        }
+
+        case OP_JSR: /* Jump Register */
+        {
+            /**
+             * Store a register value into memory
+             *  15     12 |11| 10                   0
+                [  0011   |DR| PCoffset11           ]
+             */
+            uint16_t long_flag = (instr >> 11) & 1;
+            reg[R_R7] = reg[R_PC];
+
+            if (long_flag == 1)
+            {
+                uint16_t long_pc_offset = sign_extend(instr & 0x7ff, 11);
+                reg[R_PC] += long_pc_offset; /* JSR */
+            }
+            else
+            {
+                uint16_t r1 = (instr >> 6) & 0x7;
+                reg[R_PC] = reg[r1]; /* JSRR */
+            }
+        }
+
+        case OP_AND: /* Bitwise AND */
+        {
+            uint16_t r0 = (instr >> 9) & 0x7;
+            uint16_t r1 = (instr >> 6) & 0x7;
+            uint16_t imm_flag = (instr >> 5) & 0x1;
+
+            if (imm_flag)
+            {
+                uint16_t imm5 = sign_extend(instr & 0x1f, 5);
+                reg[r0] = reg[r1] & imm5;
+            }
+            else
+            {
+                uint16_t r2 = instr & 0x7;
+                reg[r0] = reg[r1] & reg[r2];
+            }
+            update_flags(0);
         }
         }
     }
