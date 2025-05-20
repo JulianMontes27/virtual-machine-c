@@ -578,23 +578,45 @@ int main(int argc, const char *argv[])
                 update_flags(reg[R_R0]);
                 break;
             }
-            case TRAP_PUTSP: /* PUTSP: Output a byte string */
+            case TRAP_PUTSP: /* PUTSP: Output a byte string contained in a memory location (which is 16 bits or 2 bytes)*/
             {
                 /**
+                 * sys call
                  * Same as PUTS except that it outputs null terminated strings with two ASCII chars packed into a single memory location, with low 8 bits outputted frist then the high 8 bits
-                 */
-                /*
+                 * The “SP” means "String Packed”.
+                 * Each 16-bit memory word contains two characters, packed like this:
+                 * Low byte (bits 7–0) = first character
+                 * High byte (bits 15–8) = second character
+                 * This format saves space: instead of one character per word (like PUTS), you get two characters per word
+                 * Note: LC-3 is little-endian, so the lower byte comes first when printing.
                  * one char per byte (two bytes per word) here we need to swap back to big endian format
                  */
 
-                /* Get string pointer from R0 */
-                
+                /* First, we need to get the address to the memory (uint_16) word stored in the R_R0 register */
+                uint16_t *str_ptr = &memory[reg[R_R0]];
+                // This pointer points to the first address of the 16-bit word
+                while (*str_ptr != 0)
+                {
+                    uint16_t char1 = (*str_ptr) & 0xFF; // low byte (bits 7–0)
+                    putc((char)char1, stdout);
 
+                    uint16_t char2 = (*str_ptr) >> 8; // high byte (bits 15–8)
+                    if (char2 != 0)
+                    {
+                        putc((char)char2, stdout);
+                    }
 
-
+                    ++str_ptr; // Move to the next 16-bit word
+                }
+            }
+            case TRAP_HALT: /* HALT: Halt program execution */
+            {
+                puts("HALT");
+                fflush(stdout);
+                running = 0;
+                break;
             }
             }
-        }
 
         default:
         {
@@ -602,11 +624,11 @@ int main(int argc, const char *argv[])
             break;
         }
         }
+        }
+
+        /* When the program is interrupted, we want to restore the terminal settings back to normal. */
+        restore_input_buffering();
+
+        /* Return successful exit status */
+        return EXIT_SUCCESS;
     }
-
-    /* When the program is interrupted, we want to restore the terminal settings back to normal. */
-    restore_input_buffering();
-
-    /* Return successful exit status */
-    return EXIT_SUCCESS;
-}
