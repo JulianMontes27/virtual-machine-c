@@ -10,6 +10,15 @@
 HANDLE hStdin = INVALID_HANDLE_VALUE; /* Handle for standard input stream */
 DWORD fdwMode, fdwOldMode;            /* Current and original console mode flags */
 
+/* Function prototypes */
+void disable_input_buffering();
+void restore_input_buffering();
+uint16_t check_key();
+void handle_interrupt();
+uint16_t sign_extend(uint16_t x, int bit_count);
+int read_image(const char *image_path);
+void update_flags(uint16_t r);
+
 /**
  * disable_input_buffering - Configure console for immediate input processing
  *
@@ -99,15 +108,36 @@ void handle_interrupt()
  */
 uint16_t sign_extend(uint16_t x, int bit_count)
 {
-    // Checks if the sign bit is 1.
-    // For bit_count = 5, it checks bit 4(counting from 0).
-    // If that bit is 1, the number is negative, and we need to extend the 1s to the left.
     if ((x >> (bit_count - 1)) & 1)
     {
-        // If the sign bit was 1, this line fills the top bits with 1s.
-        x |= (0xFFFF << bit_count); // ets all upper bits above bit_count to 1
+        x |= (0xFFFF << bit_count);
     }
     return x;
+}
+
+/**
+ * update_flags - Update condition flags based on register value
+ *
+ * This function sets the condition flags (N, Z, P) based on the value
+ * in the specified register. Exactly one flag will be set.
+ *
+ * Parameters:
+ *   r: Register index to check
+ */
+void update_flags(uint16_t r)
+{
+    if (reg[r] == 0)
+    {
+        reg[R_COND] = FL_ZRO;
+    }
+    else if (reg[r] >> 15) /* Check if the most significant bit is 1 (negative) */
+    {
+        reg[R_COND] = FL_NEG;
+    }
+    else
+    {
+        reg[R_COND] = FL_POS;
+    }
 }
 
 /**
@@ -209,6 +239,7 @@ int main(int argc, const char *argv[])
 
     /* set the PC to starting position */
     /* 0x3000 is the default address */
+    /* Programs start at address 0x3000 instead of 0x0, because the lower addresses are left empty to leave space for the trap routine code. */
     enum
     {
         PC_START = 0x3000 // 0011000000000000 in binary (16-bit), 12288 in decimal
@@ -403,6 +434,110 @@ int main(int argc, const char *argv[])
 
             memory[reg[r1] + offset] = reg[r0];
             break;
+        }
+
+        case OP_RTI: /* Return from Interrupt */
+        {
+            /* Unused in basic implementation */
+            printf("RTI instruction not implemented\n");
+            break;
+        }
+
+        case OP_NOT: /* Bitwise NOT */
+        {
+            /**
+             * Perform logical negation on each bit, forming the 1's complement of the given binary value
+             */
+            uint16_t dr = (instr >> 9) & 0x7;
+            uint16_t sr = (instr >> 6) & 0x7;
+
+            reg[dr] = ~reg[sr]; // Bitwise NOT
+            update_flags(dr);
+            break;
+        }
+
+        case OP_LDI: /* Load indirect*/
+        {
+            /**
+             * Load a value from a location in memory into a register
+             * Store a register value into memory
+             *  15     12 | 11    9 | 8                  0
+                [  1010   |  DR    |   PCoffset9         ]
+             * An address is computed by sign-extending bits [8:0] to 16 bits and adding this value to the incremented PC. What is stored in memory at this address is the address of the data to be loaded into DR
+             */
+            /* destination register (DR) */
+            uint16_t dr = (instr >> 9) & 0x7;
+            /* PCoffset 9 */
+            uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+
+            /* add pc_offset to the current PC, look at that memory location to get the final address */
+            uint16_t addr = memory[reg[R_PC] + pc_offset];
+            reg[dr] = memory[addr];
+            update(dr);
+            break;
+        }
+
+        case OP_STI: /* Store Indirect */
+        {
+            uint16_t sr = (instr >> 9) & 0x7;
+            uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+
+            /* Get the address */
+            uint16_t addr = memory[reg[R_PC] + pc_offset];
+            /* Store the value at that address */
+            memory[addr] = reg[sr];
+            break;
+        }
+
+        case OP_JMP: /* Jump */
+        {
+            uint16_t baseR = (instr >> 9) & 0x7;
+            reg[R_PC] = reg[baseR];
+            break;
+        }
+
+        case OP_RES: /* Reserved */
+        {
+            printf("Reserved opcode encountered\n");
+            break;
+        }
+
+        case OP_LEA: /* Load Effective Address */
+        {
+            uint16_t dr = (instr >> 9) & 0x7;
+            uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
+
+            reg[dr] = reg[R_PC] + pc_offset;
+            update_flags(dr);
+            break;
+        }
+
+        case OP_TRAP: /* Trap / System Call */
+        {
+            /**
+             * The LC-3 provides a few predefined routines for performing common tasks and interacting with I/O devices. For example, there are routines for getting input from the keyboard and for displaying strings to the console. These are called trap routines which you can think of as the operating system or API for the LC-3. Each trap routine is assigned a trap code which identifies it (similar to an opcode). To execute one, the TRAP instruction is called with the trap code of the desired routine.
+             */
+            reg[R_R7] = reg[R_PC];
+
+            /* Get trap vector */
+            uint16_t trapvect = instr & 0xFF;
+
+            switch (trapvect)
+            {
+            case TRAP_GETC: /* GETC: Read a character from keyboard */
+            {
+                /* read a single ASCII char */
+                reg[R_R0] = (uint16_t)getchar();
+                update_flags(R_R0);
+                break;
+            }
+            case TRAP_OUT: /* OUT: Output a character */
+            {
+                putc((char)reg[R_R0], stdout);
+                fflush(stdout);
+                break;
+            }
+            }
         }
         }
     }
