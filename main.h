@@ -14,8 +14,8 @@
 #include <signal.h>
 /* windows only */
 #include <Windows.h>
-#include <conio.h> // _kbhit
-
+// _kbhit
+#include <conio.h>
 /**
  * Type definitions for clarity and portability
  * These ensure consistent sizes across different platforms
@@ -114,6 +114,8 @@ void restore_input_buffering();
 uint16_t check_key();
 void handle_interrupt();
 uint16_t sign_extend(uint16_t x, int bit_count);
+uint16_t swap16(uint16_t x);
+void read_image_file(FILE *file);
 int read_image(const char *image_path);
 void update_flags(uint16_t r);
 

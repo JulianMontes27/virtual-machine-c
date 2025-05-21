@@ -144,57 +144,43 @@ void update_flags(uint16_t r)
  * Returns:
  *   int: 1 on success, 0 on failure
  */
-int read_image(const char *image_path)
+uint16_t swap16(uint16_t x)
 {
-    FILE *file = fopen(image_path, "rb"); //  Open in binary read mode (important for non-text files)
-    if (!file)
-    {
-        printf("Error: Could not open file %s\n", image_path);
-        return 0;
-    }
+    return (x << 8) | (x >> 8);
+}
 
-    /* Read the origin (where in memory the program should be loaded) */
-    // The first 2 bytes of the LC-3 object file specify the origin, i.e., where in memory the program should be loaded (like 0x3000).fread tries to read 1 value of sizeof(uint16_t)(2 bytes).
+void read_image_file(FILE *file)
+{
+    /* the origin tells us where in memory to place the image */
     uint16_t origin;
-    if (fread(&origin, sizeof(origin), 1, file) != 1)
-    {
-        printf("Error: Could not read origin from file %s\n", image_path);
-        fclose(file);
-        return 0;
-    }
+    fread(&origin, sizeof(origin), 1, file);
+    origin = swap16(origin);
 
-    /* The origin tells us where in memory to put the program.
-     * We need to convert it from big-endian to little-endian if needed.
-     LC-3 object files store numbers in big-endian (MSB first).
-     x86 computers are little-endian (LSB first).
-     So we swap the bytes:
-     0x1234 (big-endian) becomes 0x3412 (little-endian)
-     */
-
-    /* Swap bytes on little endian architectures */
-    origin = (origin << 8) | (origin >> 8);
-
-    /* Load the program into memory starting at the origin address */
-    printf("Loading image %s at origin 0x%04X\n", image_path, origin);
-
+    /* we know the maximum file size so we only need one fread */
     uint16_t max_read = MEMORY_MAX - origin;
     uint16_t *p = memory + origin;
     size_t read = fread(p, sizeof(uint16_t), max_read, file);
 
-    /* Convert each word from big-endian to little-endian if necessary */
-    for (size_t i = 0; i < read; i++)
+    /* swap to little endian */
+    while (read-- > 0)
     {
-        p[i] = (p[i] << 8) | (p[i] >> 8);
+        *p = swap16(*p);
+        ++p;
     }
+}
 
-    /* Output statistics about the loaded image */
-    printf("Loaded %zu words into memory\n", read);
-
+int read_image(const char *image_path)
+{
+    FILE *file = fopen(image_path, "rb");
+    if (!file)
+    {
+        return 0;
+    };
+    read_image_file(file);
     fclose(file);
     return 1;
 }
 
-/* Memory Access */
 /**
  * Memory mapped registers take memory access a bit more complicated.
  * We cant read or write to the memory array directly, but must instead call setter and getter functions.
@@ -219,7 +205,6 @@ uint16_t mem_read(uint16_t address)
             memory[MR_KBSR] = 0;
         }
     }
-
     return memory[address];
 }
 
@@ -288,13 +273,14 @@ int main(int argc, const char *argv[])
         uint16_t op = instr >> 12; // This right-shifts the instruction value by 12 bits. In the LC-3 architecture, the leftmost 4 bits (bits 12-15) contain the opcode that identifies which instruction to execute (ADD, AND, LD, etc.).
 
         /* For now, just print the instruction for debugging */
-        printf("Executing instruction at 0x%04X: 0x%04X (opcode: 0x%X)\n", reg[R_PC] - 1, instr, op);
+        // printf("Executing instruction at 0x%04X: 0x%04X (opcode: 0x%X)\n", reg[R_PC] - 1, instr, op);
 
         /* EXECUTE */
         switch (op)
         {
-        case OP_BR: /* Branch */
+        case OP_BR:
         {
+            /* Branch */
             /*
                 --- Instruction format ---
                 15-12   11-9   8-0
@@ -322,11 +308,12 @@ int main(int argc, const char *argv[])
             {
                 reg[R_PC] += pc_offset; // jump relative to current PC
             }
-            break;
         }
+        break;
 
-        case OP_ADD: /* Add */
+        case OP_ADD:
         {
+            /* Add */
             /**
              * The ADD instruction takes two numbers, adds them together, and stores the result in a register. Each ADD instruction looks like the following:
              * Instruction format:argc
@@ -361,11 +348,12 @@ int main(int argc, const char *argv[])
 
             /* Update condition flags */
             update_flags(dr);
-            break;
         }
+        break;
 
-        case OP_LD: /* Load */
+        case OP_LD:
         {
+            /* Load */
             /**
              * Loads a value from memory into a register
              * PC-relative addressing, meaning: The memory address is computed as PC + offset, and the content at that memory address is stored in the destination register.
@@ -375,18 +363,18 @@ int main(int argc, const char *argv[])
              - Opcode (bits 15–12) = 0010 → this is LD
              - DR (bits 11–9): Destination Register (where to load the data)
              - PCoffset9 (bits 8–0): a 9-bit signed offset from the current PC (program counter)
-
              */
             uint16_t dr = (instr >> 9) & 0x7;                   // get the 11-9 bits (dr)
             uint16_t pc_offset = sign_extend(instr & 0x1FF, 9); // converts the 9-bit value into a proper signed 16-bit int, preserving its sign
             // reg[dr] = memory[reg[R_PC] + pc_offset];
             reg[dr] = mem_read(reg[R_PC] + pc_offset);
             update_flags(dr);
-            break;
         }
+        break;
 
-        case OP_ST: /* Store */
+        case OP_ST:
         {
+            /* Store */
             /**
              * Store a register value into memory
              *  15     12 | 11    9 | 8                  0
@@ -396,11 +384,12 @@ int main(int argc, const char *argv[])
             uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
             // memory[reg[R_PC] + pc_offset] = reg[dr];
             mem_write(reg[R_PC] + pc_offset, reg[dr]);
-            break;
         }
+        break;
 
-        case OP_JSR: /* Jump Register */
+        case OP_JSR:
         {
+            /* Jump Register */
             /**
              * Store a register value into memory
              *  15     12 |11| 10                   0
@@ -419,11 +408,12 @@ int main(int argc, const char *argv[])
                 uint16_t r1 = (instr >> 6) & 0x7;
                 reg[R_PC] = reg[r1]; /* JSRR */
             }
-            break;
         }
+        break;
 
-        case OP_AND: /* Bitwise AND */
+        case OP_AND:
         {
+            /* Bitwise AND */
             uint16_t r0 = (instr >> 9) & 0x7;
             uint16_t r1 = (instr >> 6) & 0x7;
             uint16_t imm_flag = (instr >> 5) & 0x1;
@@ -440,12 +430,13 @@ int main(int argc, const char *argv[])
                 uint16_t r2 = instr & 0x7;
                 reg[r0] = reg[r1] & reg[r2]; // Bitwise AND
             }
-            update_flags(0);
-            break;
+            update_flags(r0);
         }
+        break;
 
-        case OP_LDR: /* Load Register */
+        case OP_LDR:
         {
+            /* Load Register */
             uint16_t r0 = (instr >> 9) & 0x7;
             uint16_t r1 = (instr >> 6) & 0x7;
             uint16_t offset = sign_extend(instr & 0x3F, 6);
@@ -453,29 +444,30 @@ int main(int argc, const char *argv[])
             // reg[r0] = memory[reg[r1] + offset];
             reg[r0] = mem_read(reg[r1] + offset);
             update_flags(r0);
-            break;
         }
+        break;
 
-        case OP_STR: /* Store Register */
+        case OP_STR:
         {
+            /* Store Register */
             uint16_t r0 = (instr >> 9) & 0x7;
             uint16_t r1 = (instr >> 6) & 0x7;
             uint16_t offset = sign_extend(instr & 0x3F, 6);
 
             // memory[reg[r1] + offset] = reg[r0];
             mem_write(reg[r1] + offset, reg[r0]);
-            break;
         }
+        break;
 
-        case OP_RTI: /* Return from Interrupt */
-        {
+        case OP_RTI:
+            /* Return from Interrupt */
             /* Unused in basic implementation */
             printf("RTI instruction not implemented\n");
             break;
-        }
 
-        case OP_NOT: /* Bitwise NOT */
+        case OP_NOT:
         {
+            /* Bitwise NOT */
             /**
              * Perform logical negation on each bit, forming the 1's complement of the given binary value
              */
@@ -484,11 +476,12 @@ int main(int argc, const char *argv[])
 
             reg[dr] = ~reg[sr]; // Bitwise NOT
             update_flags(dr);
-            break;
         }
+        break;
 
-        case OP_LDI: /* Load indirect*/
+        case OP_LDI:
         {
+            /* Load indirect*/
             /**
              * Load a value from a location in memory into a register
              * Store a register value into memory
@@ -504,50 +497,52 @@ int main(int argc, const char *argv[])
             /* add pc_offset to the current PC, look at that memory location to get the final address */
             // uint16_t addr = memory[reg[R_PC] + pc_offset];
             // reg[dr] = memory[addr];
-
             reg[dr] = mem_read(mem_read(reg[R_PC] + pc_offset));
             update_flags(dr);
-            break;
         }
+        break;
 
-        case OP_STI: /* Store Indirect */
+        case OP_STI:
         {
+            /* Store Indirect */
             uint16_t sr = (instr >> 9) & 0x7;
             uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
 
             /* Get the address */
             // uint16_t addr = memory[reg[R_PC] + pc_offset];
-            // /* Store the value at that address */
+            /* Store the value at that address */
             // memory[addr] = reg[sr];
             mem_write(mem_read(reg[R_PC] + pc_offset), reg[sr]);
-            break;
         }
+        break;
 
-        case OP_JMP: /* Jump */
+        case OP_JMP:
         {
-            uint16_t baseR = (instr >> 9) & 0x7;
-            reg[R_PC] = reg[baseR];
-            break;
+            /* Jump */
+            /* Also handles RET */
+            uint16_t r1 = (instr >> 6) & 0x7;
+            reg[R_PC] = reg[r1];
         }
+        break;
 
-        case OP_RES: /* Reserved */
-        {
+        case OP_RES:
+            /* Reserved */
             printf("Reserved opcode encountered\n");
             break;
-        }
 
-        case OP_LEA: /* Load Effective Address */
+        case OP_LEA:
         {
+            /* Load Effective Address */
             uint16_t dr = (instr >> 9) & 0x7;
             uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
 
             reg[dr] = reg[R_PC] + pc_offset;
             update_flags(dr);
-            break;
         }
+        break;
 
-        case OP_TRAP: /* Trap / System Call */
-        {
+        case OP_TRAP:
+            /* Trap / System Call */
             /**
              * The LC-3 provides a few predefined routines for performing common tasks and interacting with I/O devices. For example, there are routines for getting input from the keyboard and for displaying strings to the console. These are called trap routines which you can think of as the operating system or API for the LC-3. Each trap routine is assigned a trap code which identifies it (similar to an opcode). To execute one, the TRAP instruction is called with the trap code of the desired routine.
              */
@@ -561,23 +556,22 @@ int main(int argc, const char *argv[])
 
             switch (trapvect)
             {
-            case TRAP_GETC: /* GETC: Read a character from keyboard */
-            {
+            case TRAP_GETC:
+                /* GETC: Read a character from keyboard */
                 /* read a single ASCII char */
                 reg[R_R0] = (uint16_t)getchar();
                 update_flags(R_R0);
                 break;
-            }
 
-            case TRAP_OUT: /* OUT: Output a character */
-            {
+            case TRAP_OUT:
+                /* OUT: Output a character */
                 putc((char)reg[R_R0], stdout);
                 fflush(stdout);
                 break;
-            }
 
-            case TRAP_PUTS: /* PUTS: output a null-terminated string to the screen (similar to 'printf' in C) */
+            case TRAP_PUTS:
             {
+                /* PUTS: output a null-terminated string to the screen (similar to 'printf' in C) */
                 /**
                  *  15    12 | 11-8  |  7      0
                     [ 1111  | xxxx  | trapvect8 ]
@@ -602,22 +596,24 @@ int main(int argc, const char *argv[])
                     str_ptr++;            // Move to next character in string
                 }
                 fflush(stdout); // Make sure it prints immediately
-                break;
             }
+            break;
 
-            case TRAP_IN: /* IN: Input a character with echo */
+            case TRAP_IN:
             {
+                /* IN: Input a character with echo */
                 printf("Enter a character: ");
-                int character = getchar();
-                reg[R_R0] = (uint16_t)character;
-                putchar((char)reg[R_R0]);
+                char character = getchar();
+                putc(character, stdout);
                 fflush(stdout);
-                update_flags(reg[R_R0]);
-                break;
+                reg[R_R0] = (uint16_t)character;
+                update_flags(R_R0);
             }
+            break;
 
-            case TRAP_PUTSP: /* PUTSP: Output a byte string contained in a memory location (which is 16 bits or 2 bytes)*/
+            case TRAP_PUTSP:
             {
+                /* PUTSP: Output a byte string contained in a memory location (which is 16 bits or 2 bytes)*/
                 /*
                  * sys call
                  * Same as PUTS except that it outputs null terminated strings with two ASCII chars packed into a single memory location, with low 8 bits outputted frist then the high 8 bits
@@ -629,46 +625,41 @@ int main(int argc, const char *argv[])
                  * Note: LC-3 is little-endian, so the lower byte comes first when printing.
                  * one char per byte (two bytes per word) here we need to swap back to big endian format
                  */
-
                 /* First, we need to get the address to the memory (uint_16) word stored in the R_R0 register */
-                uint16_t *str_ptr = &memory[reg[R_R0]];
-                // This pointer points to the first address of the 16-bit word
-                while (*str_ptr != 0)
+                uint16_t *c = memory + reg[R_R0];
+                while (*c)
                 {
-                    uint16_t char1 = (*str_ptr) & 0xFF; // low byte (bits 7–0)
-                    putc((char)char1, stdout);
-
-                    uint16_t char2 = (*str_ptr) >> 8; // high byte (bits 15–8)
-                    if (char2 != 0)
-                    {
-                        putc((char)char2, stdout);
-                    }
-
-                    ++str_ptr; // Move to the next 16-bit word
+                    char char1 = (*c) & 0xFF;
+                    putc(char1, stdout);
+                    char char2 = (*c) >> 8;
+                    if (char2)
+                        putc(char2, stdout);
+                    ++c;
                 }
+                fflush(stdout);
             }
+            break;
 
-            case TRAP_HALT: /* HALT: Halt program execution */
-            {
+            case TRAP_HALT:
+                /* HALT: Halt program execution */
                 puts("HALT");
                 fflush(stdout);
                 running = 0;
                 break;
             }
-            }
-        }
+            break;
 
         default:
-        {
-            abort(); // Terminate or exit the program by raising the 'SIGABRT' signal. The 'SIGABRT' signal is one of the signals used in operating systems to indicate an abnormal termination of a program.
+            abort(); // Terminate or exit the program by raising the 'SIGABRT' signal. The 'SIGABRT' signal is one of the signals used in operating systems to indicate an abnormal termination of a program
             break;
         }
-        }
-
-        /* When the program is interrupted, we want to restore the terminal settings back to normal. */
-        restore_input_buffering();
-
-        /* Return successful exit status */
-        return EXIT_SUCCESS;
     }
+
+    /* When the program is interrupted, we want to restore the terminal settings back to normal. */
+    restore_input_buffering();
+
+    printf("\nVM Halted. Exiting.\n"); // More descriptive exit message
+
+    /* Return successful exit status */
+    return EXIT_SUCCESS;
 }
