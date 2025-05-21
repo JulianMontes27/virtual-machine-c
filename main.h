@@ -21,7 +21,7 @@
  * These ensure consistent sizes across different platforms
  */
 typedef unsigned char uint8_t;       // 8-bit unsigned integer
-typedef unsigned short uint16_t;     // 16-bit unsigned integer
+typedef unsigned short uint16_t;     // 16-bit unsigned integer, i.e., 1010 0000 1111 0000
 typedef unsigned int uint32_t;       // 32-bit unsigned integer
 typedef unsigned long long uint64_t; // 64-bit unsigned integer
 
@@ -30,7 +30,7 @@ typedef unsigned long long uint64_t; // 64-bit unsigned integer
  * can address (from 0x0000 to 0xFFFF).
  */
 #define MEMORY_MAX (1 << 16) // "shift the number 1 to the left by 16 bits." = 10000000000000000 (17 bits) or 1 * 2^16 = 65536
-uint16_t memory[MEMORY_MAX]; /* 65536 locations each 16 bits wide */
+uint16_t memory[MEMORY_MAX]; /* 65536 unique addressable locations, each 16 bits wide */
 
 /* CPU Registers */
 enum
