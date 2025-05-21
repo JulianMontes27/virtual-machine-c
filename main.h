@@ -93,9 +93,30 @@ enum
     TRAP_HALT = 0x25   /* halt the program */
 };
 
+/* Memory mapped registers */
 /**
- * Function declarations
+ * These are special registers that are not accessible from the normal register table.ABC
+ * Instead, a special address is reserved for them in memory
  */
+enum
+{
+    MR_KBSR = 0xFE00, /* keyboard status */
+    MR_KBDR = 0xFE02  /* keyboard data */
+};
+
+/**
+ * Function declarations/prototype
+ */
+void mem_write(uint16_t address, uint16_t val);
+uint16_t mem_read(uint16_t address);
+void disable_input_buffering();
+void restore_input_buffering();
+uint16_t check_key();
+void handle_interrupt();
+uint16_t sign_extend(uint16_t x, int bit_count);
+int read_image(const char *image_path);
+void update_flags(uint16_t r);
+
 int main(int argc, const char *argv[]); /* Main function that serves as the entry point for the VM */
 
 #endif /* MAIN_H */

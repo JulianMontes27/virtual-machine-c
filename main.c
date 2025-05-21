@@ -10,16 +10,6 @@
 HANDLE hStdin = INVALID_HANDLE_VALUE; /* Handle for standard input stream */
 DWORD fdwMode, fdwOldMode;            /* Current and original console mode flags */
 
-/* Function prototypes */
-void disable_input_buffering();
-void restore_input_buffering();
-uint16_t check_key();
-void handle_interrupt();
-uint16_t sign_extend(uint16_t x, int bit_count);
-uint16_t swap16(uint16_t x);
-int read_image(const char *image_path);
-void update_flags(uint16_t r);
-
 /**
  * disable_input_buffering - Configure console for immediate input processing
  *
@@ -177,10 +167,10 @@ int read_image(const char *image_path)
      * We need to convert it from big-endian to little-endian if needed.
      LC-3 object files store numbers in big-endian (MSB first).
      x86 computers are little-endian (LSB first).
-     So we swap the bytes: 
+     So we swap the bytes:
      0x1234 (big-endian) becomes 0x3412 (little-endian)
      */
-    
+
     /* Swap bytes on little endian architectures */
     origin = (origin << 8) | (origin >> 8);
 
@@ -202,6 +192,35 @@ int read_image(const char *image_path)
 
     fclose(file);
     return 1;
+}
+
+/* Memory Access */
+/**
+ * Memory mapped registers take memory access a bit more complicated.
+ * We cant read or write to the memory array directly, but must instead call setter and getter functions.
+ * When memory is read from KBSR, the getter will check the keyboard and update both memory locations
+ */
+void mem_write(uint16_t address, uint16_t val)
+{
+    memory[address] = val;
+}
+
+uint16_t mem_read(uint16_t address)
+{
+    if (address == MR_KBSR)
+    {
+        if (check_key())
+        {
+            memory[MR_KBSR] = (1 << 15);
+            memory[MR_KBDR] = getchar();
+        }
+        else
+        {
+            memory[MR_KBSR] = 0;
+        }
+    }
+
+    return memory[address];
 }
 
 /**
@@ -226,6 +245,7 @@ int main(int argc, const char *argv[])
         printf("lc3 [image-file1] ...\n");
         exit(2);
     }
+
     // Load all image files provided as arguments
     for (int j = 1; j < argc; ++j)
     {
@@ -359,7 +379,8 @@ int main(int argc, const char *argv[])
              */
             uint16_t dr = (instr >> 9) & 0x7;                   // get the 11-9 bits (dr)
             uint16_t pc_offset = sign_extend(instr & 0x1FF, 9); // converts the 9-bit value into a proper signed 16-bit int, preserving its sign
-            reg[dr] = memory[reg[R_PC] + pc_offset];
+            // reg[dr] = memory[reg[R_PC] + pc_offset];
+            reg[dr] = mem_read(reg[R_PC] + pc_offset);
             update_flags(dr);
             break;
         }
@@ -373,7 +394,8 @@ int main(int argc, const char *argv[])
              */
             uint16_t dr = (instr >> 9) & 0x7;
             uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
-            memory[reg[R_PC] + pc_offset] = reg[dr];
+            // memory[reg[R_PC] + pc_offset] = reg[dr];
+            mem_write(reg[R_PC] + pc_offset, reg[dr]);
             break;
         }
 
@@ -428,7 +450,8 @@ int main(int argc, const char *argv[])
             uint16_t r1 = (instr >> 6) & 0x7;
             uint16_t offset = sign_extend(instr & 0x3F, 6);
 
-            reg[r0] = memory[reg[r1] + offset];
+            // reg[r0] = memory[reg[r1] + offset];
+            reg[r0] = mem_read(reg[r1] + offset);
             update_flags(r0);
             break;
         }
@@ -439,7 +462,8 @@ int main(int argc, const char *argv[])
             uint16_t r1 = (instr >> 6) & 0x7;
             uint16_t offset = sign_extend(instr & 0x3F, 6);
 
-            memory[reg[r1] + offset] = reg[r0];
+            // memory[reg[r1] + offset] = reg[r0];
+            mem_write(reg[r1] + offset, reg[r0]);
             break;
         }
 
@@ -478,8 +502,10 @@ int main(int argc, const char *argv[])
             uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
 
             /* add pc_offset to the current PC, look at that memory location to get the final address */
-            uint16_t addr = memory[reg[R_PC] + pc_offset];
-            reg[dr] = memory[addr];
+            // uint16_t addr = memory[reg[R_PC] + pc_offset];
+            // reg[dr] = memory[addr];
+
+            reg[dr] = mem_read(mem_read(reg[R_PC] + pc_offset));
             update_flags(dr);
             break;
         }
@@ -490,9 +516,10 @@ int main(int argc, const char *argv[])
             uint16_t pc_offset = sign_extend(instr & 0x1FF, 9);
 
             /* Get the address */
-            uint16_t addr = memory[reg[R_PC] + pc_offset];
-            /* Store the value at that address */
-            memory[addr] = reg[sr];
+            // uint16_t addr = memory[reg[R_PC] + pc_offset];
+            // /* Store the value at that address */
+            // memory[addr] = reg[sr];
+            mem_write(mem_read(reg[R_PC] + pc_offset), reg[sr]);
             break;
         }
 
